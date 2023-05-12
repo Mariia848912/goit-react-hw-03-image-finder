@@ -4,11 +4,11 @@ import { Searchbar } from './Searchbar/Searchbar';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { ImageGallery } from './ImageGallery/ImageGallery';
-import { ImageGalleryItem } from './ImageGalleryItem/ImageGalleryItem';
-import { fetchPictures } from '../services/pixabay-api';
+import { getPictures } from '../services/pixabay-api';
 import { Button } from './Button/Button';
 import { Loader } from './Loader/Loader';
 import { Modal } from './Modal/Modal';
+import { ErrorText } from './ErrorText/ErrorText';
 
 const notification = {
   error: 'Whoops, something went wrong',
@@ -22,129 +22,99 @@ export class App extends Component {
     searchQuery: '',
     page: 1,
     totalHits: null,
-    status: 'idle',
-    loading: false,
+    isloading: false,
     showModal: false,
-    selectedPictures: null,
+    selectedPicture: null,
+    error: null,
   };
 
-  async componentDidUpdate(prevProps, prevState) {
-    if (prevState.searchQuery !== this.state.searchQuery) {
-      this.setState({ loading: true, pictures: [] });
+  componentDidUpdate(_, prevState) {
+    const { searchQuery, page } = this.state;
 
-      try {
-        await fetchPictures(this.state.searchQuery, this.state.page).then(
-          pictures => {
-            if (pictures.hits.length !== 0) {
-              return this.setState({
-                pictures: pictures.hits,
-                totalHits: pictures.totalHits,
-              });
-            }
-            return toast.error(notification.noInfoInTheGallery);
-          }
-        );
-      } catch (error) {
-        toast.error(notification.error);
-        console.log(error);
-      } finally {
-        this.setState({ loading: false });
-      }
-    }
-
-    if (prevState.page !== this.state.page) {
-      this.setState({ loading: true });
-      try {
-        // console.log("до фетч");
-        await fetchPictures(this.state.searchQuery, this.state.page).then(
-          pictures => {
-            if (
-              pictures.hits.length !== 0 &&
-              prevState.page !== this.state.page
-            ) {
-              return this.setState(prevState => ({
-                pictures: [...prevState.pictures, ...pictures.hits],
-              }));
-            }
-
-            return toast.error(notification.noInfoInTheGallery);
-          }
-        );
-      } catch (error) {
-        toast.error(notification.error);
-        console.log(error);
-      } finally {
-        this.setState({ loading: false });
-      }
+    if (prevState.searchQuery !== searchQuery || prevState.page !== page) {
+      this.setState({ isloading: true });
+      this.fetchPictures(searchQuery, page);
     }
   }
+
+  fetchPictures = async (searchQuery, page) => {
+    try {
+      this.setState({ isloading: true });
+      const info = await getPictures(searchQuery, page);
+
+      if (info.hits.length === 0) {
+        return toast.error(notification.noInfoInTheGallery);
+      }
+      
+      this.setState(prevState => ({
+        pictures: [...prevState.pictures, ...info.hits],
+        totalHits: info.totalHits,
+      }));
+    } catch (error) {
+      this.setState({ error });
+    } finally {
+      this.setState({ isloading: false });
+    }
+  };
   handleFormSubmit = searchQuery => {
     if (searchQuery.trim() === '') {
       toast.error(notification.noInfoToSearch);
       return;
     }
-    this.setState({ searchQuery });
+    this.setState({ searchQuery, page: 1, pictures: [] });
   };
-  choosePicture = srs => {
-    const founPicture = this.searchPicture(srs);
-    this.setState({ selectedPictures: founPicture });
-    this.toggleModal();
-  };
-  searchPicture = srs => {
-    const { pictures } = this.state;
-    const foundPicture = pictures.find(picture => picture.webformatURL === srs);
-    return foundPicture;
-  };
-  incrementPage = () => {
+
+  onLoadMore = () => {
     this.setState(prevState => ({
       page: prevState.page + 1,
     }));
   };
 
-  toggleModal = () => {
-    return this.setState(prevState => ({
-      showModal: !prevState.showModal,
-    }));
+  onShowModal = (largeImageURL, tags) => {
+    this.setState({
+      showModal: true,
+      selectedPicture: { largeImageURL, tags },
+    });
   };
-  scroll = () => {
-    const { height: cardHeight } = document
-      .querySelector('ul')
-      .firstElementChild.getBoundingClientRect();
 
-    window.scrollBy({
-      top: cardHeight * 2,
-      behavior: 'smooth',
+  onCloseModal = () => {
+    this.setState({
+      showModal: false,
+      selectedPicture: null,
     });
   };
 
   render() {
-    const { pictures, loading, showModal, selectedPictures, totalHits, page } =
-      this.state;
-    const checkEndList = page * 12;
+    const {
+      pictures,
+      isloading,
+      showModal,
+      selectedPicture,
+      totalHits,
+      error,
+    } = this.state;
+    const checkEndList = totalHits / pictures.length;
 
     return (
       <Container>
         <Searchbar onSubmit={this.handleFormSubmit} />
-        <ToastContainer autoClose={3000} />
-        {pictures.length > 0 ? (
-          <ImageGallery>
-            <ImageGalleryItem
-              pictures={pictures}
-              onClickImg={this.choosePicture}
-            />
-          </ImageGallery>
-        ) : null}
-        {pictures.length > 0 && !loading && checkEndList < totalHits && (
-          <Button onIncrement={this.incrementPage} />
+
+        {pictures.length > 0 && (
+          <ImageGallery pictures={pictures} onShowModal={this.onShowModal} />
         )}
-        {loading ? <Loader /> : null}
+        {pictures.length > 0 && !isloading && checkEndList > 1 && (
+          <Button onClick={this.onLoadMore} />
+        )}
+        {isloading && <Loader />}
         {showModal && (
           <Modal
-            largeImageURL={selectedPictures.largeImageURL}
-            alt={selectedPictures.tags}
-            onClose={this.toggleModal}
-          ></Modal>
+            largeImageURL={selectedPicture.largeImageURL}
+            alt={selectedPicture.tags}
+            onClose={this.onCloseModal}
+          />
         )}
+        {error && <ErrorText/>}
+        <ToastContainer autoClose={3000} />
       </Container>
     );
   }
